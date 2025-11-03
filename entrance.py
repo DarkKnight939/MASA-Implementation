@@ -29,17 +29,50 @@ from utils.tradeEnv import StockPortfolioEnv, StockPortfolioEnv_cash
 from utils.model_pool import model_select, benchmark_algo_select
 from utils.callback_func import PoCallback
 from RL_controller.market_obs import MarketObserver, MarketObserver_Algorithmic
+from utils.data_downloader import download_market_data
 import timeit
 
 def RLonly(config):
     # For running the single-agent RL-based framework (TD3-Profit, TD3-PR, TD3-SR)
     # Get dataset
-    mkt_name = config.market_name
-    fpath = os.path.join(config.dataDir, '{}_{}_{}.csv'.format(mkt_name, config.topK, config.freq))
+    # Allow using an explicit dataset file if provided in the config (or via MASA_DATA_FILE env var)
+    if getattr(config, 'dataFile', None):
+        fpath = config.dataFile
+    else:
+        mkt_name = config.market_name
+        fpath = os.path.join(config.dataDir, '{}_{}_{}.csv'.format(mkt_name, config.topK, config.freq))
+
     if not os.path.exists(fpath):
-        raise ValueError("Cannot load the data from {}".format(fpath))
+        # Attempt to download the required dataset automatically (only for auto-constructed filenames)
+        # If the user specified an explicit dataFile, don't attempt auto-download — fail so the user can correct the path.
+        if getattr(config, 'dataFile', None):
+            raise ValueError("Cannot load the data from {}. Please check the path provided in Config.dataFile".format(fpath))
+        print(f"Dataset {fpath} not found. Attempting to download using yfinance...")
+        try:
+            download_market_data(config)
+        except Exception as e:
+            raise ValueError("Cannot load the data from {} and automatic download failed: {}".format(fpath, e))
+        if not os.path.exists(fpath):
+            raise ValueError("Cannot load the data from {} after downloading".format(fpath))
+
     data = pd.DataFrame(pd.read_csv(fpath, header=0))
     
+    # Ensure market index file has required columns; if not, try to (re)download
+    idx_path = os.path.join(config.dataDir, '{}_{}_index.csv'.format(mkt_name, config.freq))
+    required_idx_cols = set(['date', 'open', 'high', 'low', 'close'])
+    try:
+        if os.path.exists(idx_path):
+            with open(idx_path, 'r') as f:
+                header = f.readline().strip().split(',')
+            if not required_idx_cols.issubset(set(header)):
+                print(f"Existing index file {idx_path} doesn't contain required market columns; regenerating via downloader.")
+                download_market_data(config)
+        else:
+            # index file missing -> attempt download
+            download_market_data(config)
+    except Exception as e:
+        print(f"Warning: automatic index regeneration failed: {e}")
+
     # Preprocess features
     featProc = FeatureProcesser(config=config)
     data_dict = featProc.preprocess_feat(data=data)
@@ -48,6 +81,7 @@ def RLonly(config):
     print("Data has been processed..")
 
     # Initialize environment
+    
     trainInvest_env_para = config.invest_env_para 
     env_train = StockPortfolioEnv(
         config=config, rawdata=data_dict['train'], mode='train', stock_num=stock_num, action_dim=stock_num, 
@@ -99,11 +133,41 @@ def RLonly(config):
 def RLcontroller(config):
     # For running the MASA framework
     # Get dataset
-    mkt_name = config.market_name
-    fpath = os.path.join(config.dataDir, '{}_{}_{}.csv'.format(mkt_name, config.topK, config.freq))
+    # Allow using an explicit dataset file if provided in the config (or via MASA_DATA_FILE env var)
+    if getattr(config, 'dataFile', None):
+        fpath = config.dataFile
+    else:
+        mkt_name = config.market_name
+        fpath = os.path.join(config.dataDir, '{}_{}_{}.csv'.format(mkt_name, config.topK, config.freq))
+
     if not os.path.exists(fpath):
-        raise ValueError("Cannot load the data from {}".format(fpath))
+        if getattr(config, 'dataFile', None):
+            raise ValueError("Cannot load the data from {}. Please check the path provided in Config.dataFile".format(fpath))
+        print(f"Dataset {fpath} not found. Attempting to download using yfinance...")
+        try:
+            download_market_data(config)
+        except Exception as e:
+            raise ValueError("Cannot load the data from {} and automatic download failed: {}".format(fpath, e))
+        if not os.path.exists(fpath):
+            raise ValueError("Cannot load the data from {} after downloading".format(fpath))
+
     data = pd.DataFrame(pd.read_csv(fpath, header=0))
+
+    # Ensure market index file has required columns; if not, try to (re)download
+    idx_path = os.path.join(config.dataDir, '{}_{}_index.csv'.format(mkt_name, config.freq))
+    required_idx_cols = set(['date', 'open', 'high', 'low', 'close'])
+    try:
+        if os.path.exists(idx_path):
+            with open(idx_path, 'r') as f:
+                header = f.readline().strip().split(',')
+            if not required_idx_cols.issubset(set(header)):
+                print(f"Existing index file {idx_path} doesn't contain required market columns; regenerating via downloader.")
+                download_market_data(config)
+        else:
+            # index file missing -> attempt download
+            download_market_data(config)
+    except Exception as e:
+        print(f"Warning: automatic index regeneration failed: {e}")
 
     # Preprocess features
     featProc = FeatureProcesser(config=config)

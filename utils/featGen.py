@@ -15,6 +15,31 @@ from talib import abstract
 import sys
 sys.path.append(".")
 
+path = "./data/DJIA_1d_index.csv"
+
+df = pd.read_csv(path)
+
+# Rename columns if not already fixed
+df.rename(columns={
+    "Open": "open",
+    "High": "high",
+    "Low": "low",
+    "Close": "close",
+    "Volume": "volume",
+    "date": "date"
+}, inplace=True)
+
+# Convert to numeric (force errors='coerce' to handle stray text)
+for col in ["open", "high", "low", "close", "volume"]:
+    df[col] = pd.to_numeric(df[col], errors='coerce')
+
+# Drop rows that became NaN after conversion (optional)
+df.dropna(subset=["open", "high", "low", "close"], inplace=True)
+
+# Save it back
+df.to_csv(path, index=False)
+print(" Numeric conversion done. File cleaned and saved.")
+
 class FeatureProcesser:
     """
     Preprocess the training data.
@@ -23,21 +48,27 @@ class FeatureProcesser:
         self.config = config
     
     def preprocess_feat(self, data):
-        data = self.gen_feat(data=data)
-        data = self.scale_feat(data=data)
-        data = self.process_finedata(data=data)
+            """
+            Preprocess features (daily frequency only, fine-frequency removed).
 
-        """
-        data: dict
-        - train: pd.DataFrame
-        - valid: pd.DataFrame
-        - test: pd.DataFrame
-        - bftrain: pd.DataFrame
-        - extra_train: dict {daily_market, fine_market, fine_stock}: pd.DataFrame
-        - extra_valid: dict {daily_market, fine_market, fine_stock}: pd.DataFrame
-        - extra_test: dict {daily_market, fine_market, fine_stock}: pd.DataFrame
-        """
-        return data
+            data: dict
+            - train: pd.DataFrame
+            - valid: pd.DataFrame
+            - test: pd.DataFrame
+            - bftrain: pd.DataFrame
+            - extra_train/valid/test: empty dict placeholders (fine data removed)
+            """
+            data = self.gen_feat(data=data)
+            data = self.scale_feat(data=data)
+
+            # Since fine-frequency data is removed, provide empty placeholders
+            data['extra_train'] = {}
+            data['extra_valid'] = {}
+            data['extra_test'] = {}
+
+            print("[INFO] Fine-frequency data skipped — using daily data only.")
+            return data
+
     
     def gen_feat(self, data):
         data['date'] = pd.to_datetime(data['date'])
@@ -328,6 +359,19 @@ class FeatureProcesser:
             fpath = os.path.join(self.config.dataDir, '{}_{}_index.csv'.format(self.config.market_name , '1d'))
             isHasFineData = False
             print("Cannot find the {}-freq market data, will use 1d data instead.".format(freq))
+        # Check columns before reading with usecols
+        try:
+            with open(fpath, 'r') as f:
+                first_line = f.readline()
+            found_cols = [c.strip() for c in first_line.split(',')]
+            expected_cols = ['date'] + list(self.config.use_features)
+            missing = [c for c in expected_cols if c not in found_cols]
+            if missing:
+                print(f"ERROR: File {fpath} is missing columns: {missing}\nFound columns: {found_cols}")
+                raise ValueError(f"File {fpath} does not contain required columns: {expected_cols}")
+        except Exception as e:
+            print(f"ERROR reading columns from {fpath}: {e}")
+            raise
         raw_data = pd.DataFrame(pd.read_csv(fpath, header=0, usecols=['date']+list(self.config.use_features)))
         raw_data['date'] = pd.to_datetime(raw_data['date'])
         raw_data = raw_data.groupby(['date']).mean().reset_index(drop=False, inplace=False)

@@ -12,9 +12,21 @@ import os
 import pandas as pd
 import time
 import copy
-from gym.utils import seeding
-import gym
-from gym import spaces
+try:
+    from gym.utils import seeding
+except ImportError:
+    import numpy as np
+
+    class seeding:
+        @staticmethod
+        def np_random(seed=None):
+            np_random = np.random.RandomState()
+            seed = np_random.randint(0, 2**32 - 1) if seed is None else seed
+            np_random.seed(seed)
+            return np_random, seed
+
+import gymnasium as gym
+from gymnasium import spaces
 from stable_baselines3.common.vec_env import DummyVecEnv
 from scipy.stats import entropy
 import scipy.stats as spstats
@@ -97,6 +109,8 @@ class StockPortfolioEnv(gym.Env):
             self.state = np.transpose(self.curData[self.tech_indicator_lst_wocov].values)
         self.state = self.state.flatten()
         self.state = np.append(self.state, [0], axis=0)
+        self.state_dim = self.state.shape[0]
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.state_dim,))
         self.ctl_state = {k:np.array(list(self.curData[k].values)) for k in self.config.otherRef_indicator_lst}
         self.terminal = False
 
@@ -179,8 +193,10 @@ class StockPortfolioEnv(gym.Env):
             self.model_save_flag = True
             invest_profile = self.get_results()
             self.save_profile(invest_profile=invest_profile)
+            terminated = self.terminal
+            truncated = False  # or True if you have a max-step timeout
+            return self.state, self.reward, terminated, truncated, {}
 
-            return self.state, self.reward, self.terminal, {}
         else:
             actions = np.reshape(actions, (-1)) # [1, num_of_stocks] or [num_of_stocks, ]
             weights = self.weights_normalization(actions=actions) # Unnormalized weights -> normalized weights 
@@ -354,68 +370,78 @@ class StockPortfolioEnv(gym.Env):
             self.reward = cur_reward
             self.reward_lst.append(self.reward)
             self.model_save_flag = False
-            return self.state, self.reward, self.terminal, {}
+            terminated = self.terminal
+            truncated = False  # or True if you have a max-step timeout
+            return self.state, self.reward, terminated, truncated, {}
 
-    def reset(self):
-        self.epoch = self.epoch + 1
-        self.curTradeDay = 0
+        
 
-        self.curData = copy.deepcopy(self.rawdata.loc[self.curTradeDay, :])
-        self.curData.sort_values(['stock'], ascending=True, inplace=True)
-        self.curData.reset_index(drop=True, inplace=True)
-        if self.config.enable_cov_features:   
-            self.covs = np.array(self.curData['cov'].values[0])
-            self.state = np.append(self.covs, np.transpose(self.curData[self.tech_indicator_lst_wocov].values), axis=0)
-        else:
-            self.state = np.transpose(self.curData[self.tech_indicator_lst_wocov].values)
-        self.state = self.state.flatten()
-        self.state = np.append(self.state, [0], axis=0)
-        self.ctl_state = {k:np.array(list(self.curData[k].values)) for k in self.config.otherRef_indicator_lst} 
-        self.terminal = False
+    def reset(self, seed=None, options=None):
+            super().reset(seed=seed) if hasattr(super(), "reset") else None
+            if seed is not None:
+                np.random.seed(seed)
 
-        self.profit_lst = [0] 
-        cur_risk_boundary, stock_ma_price = self.run_mkt_observer(stage='reset')  
-        if stock_ma_price is not None:
-            self.ctl_state['MA-{}'.format(self.config.otherRef_indicator_ma_window)] = stock_ma_price
+            self.epoch = self.epoch + 1
+            self.curTradeDay = 0
 
-        self.cur_capital = self.initial_asset
+            self.curData = copy.deepcopy(self.rawdata.loc[self.curTradeDay, :])
+            self.curData.sort_values(['stock'], ascending=True, inplace=True)
+            self.curData.reset_index(drop=True, inplace=True)
 
+            if self.config.enable_cov_features:   
+                self.covs = np.array(self.curData['cov'].values[0])
+                self.state = np.append(self.covs, np.transpose(self.curData[self.tech_indicator_lst_wocov].values), axis=0)
+            else:
+                self.state = np.transpose(self.curData[self.tech_indicator_lst_wocov].values)
+            
+            self.state = self.state.flatten()
+            self.state = np.append(self.state, [0], axis=0)
 
-        self.cvar_lst = [0]
-        self.cvar_raw_lst = [0]
+            self.ctl_state = {k: np.array(list(self.curData[k].values)) for k in self.config.otherRef_indicator_lst} 
+            self.terminal = False
 
-        self.asset_lst = [self.initial_asset] 
+            self.profit_lst = [0] 
+            cur_risk_boundary, stock_ma_price = self.run_mkt_observer(stage='reset')  
+            if stock_ma_price is not None:
+                self.ctl_state['MA-{}'.format(self.config.otherRef_indicator_ma_window)] = stock_ma_price
 
-        self.actions_memory = [np.array([1/self.stock_num]*self.stock_num) * self.bound_flag]
-        self.date_memory = [self.curData['date'].unique()[0]]
-        self.reward_lst = [0]
-        self.action_cbf_memeory = [np.array([0] * self.stock_num)]
-        self.action_rl_memory = [np.array([1/self.stock_num]*self.stock_num) * self.bound_flag]
+            self.cur_capital = self.initial_asset
+            self.cvar_lst = [0]
+            self.cvar_raw_lst = [0]
+            self.asset_lst = [self.initial_asset] 
 
-        self.risk_adj_lst = [cur_risk_boundary]
-        self.is_last_ctrl_solvable = False
-        self.risk_raw_lst = [0]
-        self.risk_cbf_lst = [0]
-        self.return_raw_lst = [self.initial_asset]
-        self.solver_stat = {'solvable': 0, 'insolvable': 0, 'stochastic_solvable': 0, 'stochastic_time': [], 'socp_solvable': 0, 'socp_time': []} 
+            self.actions_memory = [np.array([1/self.stock_num]*self.stock_num) * self.bound_flag]
+            self.date_memory = [self.curData['date'].unique()[0]]
+            self.reward_lst = [0]
+            self.action_cbf_memeory = [np.array([0] * self.stock_num)]
+            self.action_rl_memory = [np.array([1/self.stock_num]*self.stock_num) * self.bound_flag]
 
-        self.ctrl_weight_lst = [1.0]
-        self.solvable_flag = []
-        self.risk_pred_lst = []
+            self.risk_adj_lst = [cur_risk_boundary]
+            self.is_last_ctrl_solvable = False
+            self.risk_raw_lst = [0]
+            self.risk_cbf_lst = [0]
+            self.return_raw_lst = [self.initial_asset]
+            self.solver_stat = {'solvable': 0, 'insolvable': 0, 'stochastic_solvable': 0, 'stochastic_time': [], 'socp_solvable': 0, 'socp_time': []} 
 
-        self.rl_reward_risk_lst = []
-        self.rl_reward_profit_lst = []
-        self.cnt1 = 0
-        self.cnt2 = 0
-        self.stepcount = 0
+            self.ctrl_weight_lst = [1.0]
+            self.solvable_flag = []
+            self.risk_pred_lst = []
 
-        self.start_cputime = time.process_time()
-        self.start_systime = time.perf_counter()
-        return self.state
+            self.rl_reward_risk_lst = []
+            self.rl_reward_profit_lst = []
+            self.cnt1 = 0
+            self.cnt2 = 0
+            self.stepcount = 0
+
+            self.start_cputime = time.process_time()
+            self.start_systime = time.perf_counter()
+
+            self.state_dim = self.state.shape[0]
+            self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.state_dim,))
+            return self.state, {}
 
     def render(self, mode='human'):
-        return self.state
-    
+        return self.state    
 
     def softmax_normalization(self, actions):
         if np.sum(np.abs(actions)) == 0:  
@@ -695,11 +721,28 @@ class StockPortfolioEnv(gym.Env):
                         'downsideAtValue_risk_policy_1': invest_profile['daily_downsideAtValue_risk_lst'],
                         'cvar_policy_1': invest_profile['cvar_lst'], 'cvar_raw_policy_1': invest_profile['cvar_raw_lst'],
                         }
+            # Ensure all lists have the same length
+            min_len = min(len(v) for v in step_data.values())
+            for k in step_data:
+                step_data[k] = step_data[k][:min_len]
+            # --- Debug mismatch lengths ---
+            for key, val in step_data.items():
+                print(f"{key}: {len(val)}")
             step_data = pd.DataFrame(step_data)
         else:
             step_data = pd.DataFrame(pd.read_csv(fpath, header=0))
             
         if bestmodel_dict['{}_ep'.format(self.config.trained_best_model_type)] == invest_profile['ep']:
+            # --- Align array lengths before adding new columns ---
+            len_df = len(step_data)
+            len_asset = len(invest_profile['asset_lst'])
+
+            if len_asset != len_df:
+                min_len = min(len_df, len_asset)
+                print(f"[WARN] Length mismatch in save_profile(): step_data={len_df}, asset_lst={len_asset}. Truncating to {min_len}.")
+                step_data = step_data.iloc[:min_len].copy()
+                invest_profile['asset_lst'] = invest_profile['asset_lst'][:min_len]
+
             step_data['capital_policy_best'] = invest_profile['asset_lst']
             step_data['dailyReturn_policy_best'] = invest_profile['daily_return_lst']
             step_data['reward_policy_best'] = invest_profile['reward_lst']
@@ -775,12 +818,18 @@ class StockPortfolioEnv(gym.Env):
 
 
     def run_mkt_observer(self, stage=None, rate_of_price_change=None):
+        if getattr(self.config, 'finefreq', None) is None or \
+            self.extra_data is None or \
+            'fine_market' not in self.extra_data or \
+            self.extra_data.get('fine_market') is None:
+                # Return safe defaults (None or neutral values)
+                return None, None
         cur_date = self.curData['date'].unique()[0]
         if self.config.enable_market_observer:
             if stage in ['reset', 'init'] and (self.mode == 'train'):
                 self.mkt_observer.reset()
 
-            finemkt_feat = self.extra_data['fine_market']
+            finemkt_feat = self.extra_data.get('fine_market', None)
             ma_close = finemkt_feat[finemkt_feat['date']==cur_date][['mkt_{}_close'.format(self.config.finefreq), 'mkt_{}_ma'.format(self.config.finefreq)]].values[-1]
             mkt_cur_close_price = ma_close[0]
             mkt_ma_price = ma_close[1]
@@ -864,8 +913,9 @@ class StockPortfolioEnv_cash(StockPortfolioEnv):
             self.model_save_flag = True
             invest_profile = self.get_results()
             self.save_profile(invest_profile=invest_profile)
-
-            return self.state, self.reward, self.terminal, {}
+            terminated = self.terminal
+            truncated = False  # or True if you have a max-step timeout
+            return self.state, self.reward, terminated, truncated, {}
         else:
             actions = np.reshape(actions, (-1)) # [1, num_of_stocks] or [num_of_stocks, ]
             weights = self.weights_normalization(actions=actions) # Unnormalized weights -> normalized weights 
@@ -1044,5 +1094,6 @@ class StockPortfolioEnv_cash(StockPortfolioEnv):
             self.reward = cur_reward
             self.reward_lst.append(self.reward)
             self.model_save_flag = False
-
-            return self.state, self.reward, self.terminal, {}
+            terminated = self.terminal
+            truncated = False  # or True if you have a max-step cutoff
+            return self.state, self.reward, terminated, truncated, {}

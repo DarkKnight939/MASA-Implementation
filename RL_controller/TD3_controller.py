@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch as th
 from torch.nn import functional as F
@@ -124,7 +124,7 @@ class ActorAdj(BasePolicy):
 
     def forward(self, obs: th.Tensor) -> th.Tensor:
         # assert deterministic, 'The TD3 actor only outputs deterministic actions'
-        features = self.extract_features(obs)
+        features = self.extract_features(obs, self.features_extractor)
         td3_decision = self.mu(features[:, :-self.action_dim]) # range [0, 1], sum=1
         mkt_decision = features[:, -self.action_dim:] # range [0, 1], sum=1
         final_output = (td3_decision + mkt_decision) - 1 # range [-1, 1]

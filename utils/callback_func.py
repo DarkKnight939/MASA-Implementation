@@ -66,7 +66,7 @@ class PoCallback(BaseCallback):
             ModelCls = model_select(model_name=self.config.rl_model_name,  mode=self.config.mode)
             trained_model = ModelCls.load(curmpath)
             if self.valid_env is not None:
-                obs_valid = self.valid_env.reset()
+                obs_valid, _ = self.training_env.envs[0].reset()
                 while True:
                     a_rlonly, _ = trained_model.predict(obs_valid)
                     a_rlonly = np.reshape(a_rlonly, (-1))
@@ -78,7 +78,8 @@ class PoCallback(BaseCallback):
                     a_final = self.risk_controller(a_rl=a_rl, env=self.valid_env)
                     a_final = a_final / np.sum(np.abs(a_final))
                     a_final = np.array([a_final])
-                    obs_valid, rewards, terminal_flag, _ = self.valid_env.step(a_final) 
+                    obs_valid, rewards, terminated, truncated, _ = self.valid_env.step(a_final)
+                    terminal_flag = terminated or truncated
                     if terminal_flag:
                         break    
             

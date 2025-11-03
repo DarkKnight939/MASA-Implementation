@@ -24,7 +24,7 @@ import datetime
 from RL_controller.TD3_controller import TD3PolicyOriginal
 
 class Config():
-    def __init__(self, seed_num=2022, current_date=None):
+    def __init__(self, seed_num=2022, current_date=None, data_file=None):
 
         self.notes = 'AAMAS MASA Implementation'
 
@@ -78,6 +78,13 @@ class Config():
         self.period_mode = 1 
         self.tmp_name = 'Cls3_{}_{}_K{}_M{}_{}_{}'.format(self.mode, self.mktobs_algo, self.topK, self.period_mode, self.market_name, self.trained_best_model_type)
         self.dataDir = './data'
+        # Optional explicit data file path (overrides auto filename construction).
+        # Can be provided when creating Config or via environment variable MASA_DATA_FILE.
+        env_data_file = os.environ.get('MASA_DATA_FILE', None)
+        if data_file is not None:
+            self.dataFile = data_file
+        else:
+            self.dataFile = env_data_file
         self.pricePredModel = 'MA'
         self.cov_lookback = 5 
         self.norm_method = 'sum'
@@ -187,25 +194,28 @@ class Config():
         self.po_weight_decay = 0.001
 
     def load_market_observer_config(self):
+        # Use only daily frequency data — disable fine-frequency features
         self.freq = '1d'
-        self.finefreq = '60m'
-        self.fine_window_size = 4
+        self.finefreq = None           # Disable fine-frequency mode
+        self.fine_window_size = 0      # No fine data windows
         self.feat_scaler = 10 
-        
+
         self.hidden_vec_loss_weight = 1e4
         self.sigma_loss_weight = 1e5
         self.lambda_min = 0.0
         self.lambda_max = 1.0
         self.sigma_min = 0.0  
         self.sigma_max = 1.0  
-        
+
+        # Disable fine-stock and fine-market feature columns entirely
         self.finestock_feat_cols_lst = []
         self.finemkt_feat_cols_lst = []
-        for ifeat in self.use_features:
-            for iwin in range(1, self.fine_window_size+1):
-                self.finestock_feat_cols_lst.append('stock_{}_{}_w{}'.format(self.finefreq, ifeat, iwin))
-                self.finemkt_feat_cols_lst.append('mkt_{}_{}_w{}'.format(self.finefreq, ifeat, iwin))
 
+        # Only include normal (daily) features
+        for ifeat in self.use_features:
+            # Fine features are skipped — only daily features are used
+            pass
+        
     def load_para(self):
         if self.enable_market_observer:
             if self.rl_model_name == 'TD3':

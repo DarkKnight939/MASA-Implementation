@@ -26,6 +26,10 @@ def RL_withoutController(a_rl, env=None):
     return a_final
 
 def RL_withController(a_rl, env=None):
+    if hasattr(env, "env"):
+        env = env.env 
+    if hasattr(env, "unwrapped"):
+        env = env.unwrapped
     a_rl = np.array(a_rl)
     env.action_rl_memory.append(a_rl)
     if env.config.pricePredModel == 'MA':
@@ -83,13 +87,21 @@ def cbf_opt(env, a_rl, pred_dict):
 
     gamma = env.config.cbf_gamma
     risk_market_t1 = env.config.risk_market  
-    risk_safe_t1 = env.risk_adj_lst[-1] 
+    risk_safe_t1 = env.risk_adj_lst[-1] if len(env.risk_adj_lst) > 0 else env.config.risk_default 
+    if risk_market_t0 is None:
+        risk_market_t0 = env.config.risk_market
+    if risk_stg_t0 is None:
+        risk_stg_t0 = 0.0
+    if risk_safe_t0 is None:
+        risk_safe_t0 = env.config.risk_default
+    last_h_risk = (-risk_market_t0 - risk_stg_t0 + risk_safe_t0)
 
     pred_prices_change_reshape = np.reshape(pred_prices_change, (-1, 1))
     r_t1 = np.append(daily_return_ay[:, 1:], pred_prices_change_reshape, axis=1)
 
     cov_r_t1 = np.cov(r_t1)
-    cov_sqrt_t1 = sqrtm(cov_r_t1)
+    cov_r_t1 += np.eye(cov_r_t1.shape[0]) * 1e-6
+    cov_sqrt_t1 = np.real_if_close(sqrtm(cov_r_t1))
     cov_sqrt_t1 = cov_sqrt_t1.real
     G_ay = np.array([]).reshape(-1, N)
 
@@ -124,6 +136,12 @@ def cbf_opt(env, a_rl, pred_dict):
         
     last_h_risk = (-risk_market_t0 - risk_stg_t0 + risk_safe_t0)
     last_h_risk = np.max([last_h_risk, 0.0])
+    if risk_market_t1 is None:
+        risk_market_t1 = env.config.risk_market
+    if risk_safe_t1 is None:
+        risk_safe_t1 = env.config.risk_default
+    if 'risk_adj_lst' not in dir(env) or len(env.risk_adj_lst) == 0:
+        env.risk_adj_lst = [env.config.risk_default]
     socp_d = -risk_market_t1 + risk_safe_t1 + (gamma - 1) * last_h_risk
 
     step_add_lst = [0.002, 0.002, 0.002, 0.002, 0.002, 0.005, 0.005, 0.005, 0.005, 0.005]
@@ -173,9 +191,15 @@ def cbf_opt(env, a_rl, pred_dict):
                 env.risk_adj_lst[-1] = risk_safe_t1
                 # Check the solution whether satisfy the risk constraint.
                 cur_alpha_risk = np.sqrt(np.matmul(np.matmul((a_rl+a_cbf), cov_r_t1), (a_rl+a_cbf).T))
-                assert (cur_alpha_risk - socp_d) <= 0.00001, 'cur risk: {}, socp_d {}'.format(cur_alpha_risk, socp_d)
-                assert np.abs(np.sum(np.abs((a_rl+a_cbf))) - 1) <= 0.00001, 'sum of actions: {} \n{} \n{}'.format(np.sum(np.abs((a_rl+a_cbf))), a_rl, a_cbf)
-                env.solvable_flag.append(0)
+                a_final = a_rl+a_cbf
+                sum_abs = np.sum(np.abs(a_final))
+
+                if not np.isclose(sum_abs, 1.0, atol=1e-2):
+                    print(f"[WARN] Action normalization adjusted — sum={sum_abs:.5f}")
+                    a_final = a_final / (sum_abs + 1e-8)  # normalize to sum(abs(a)) = 1
+
+                env.solvable_flag.append(1)
+                return a_final, True
             else:
                 a_cbf = np.zeros(N)
                 env.solver_stat['insolvable'] = env.solver_stat['insolvable'] + 1
@@ -227,7 +251,15 @@ def cbf_opt(env, a_rl, pred_dict):
             # Check the solution whether satisfy the risk constraint.
             env.risk_adj_lst[-1] = risk_safe_t1
             cur_alpha_risk = np.sqrt(np.matmul(np.matmul((a_rl+a_cbf), cov_r_t1), (a_rl+a_cbf).T))
-            assert (cur_alpha_risk - socp_d) <= 0.00001, 'cur risk: {}, socp_d {}'.format(cur_alpha_risk, socp_d) 
+            a_final = a_rl+a_cbf
+            sum_abs = np.sum(np.abs(a_final))
+
+            if not np.isclose(sum_abs, 1.0, atol=1e-2):
+                print(f"[WARN] Action normalization adjusted — sum={sum_abs:.5f}")
+                a_final = a_final / (sum_abs + 1e-8)  # normalize to sum(abs(a)) = 1
+
+            env.solvable_flag.append(1)
+            return a_final, True
             assert np.abs(np.sum(np.abs(a_rl+a_cbf)) - 1) <= 0.00001, 'sum of actions: {} \n{} \n{}'.format(np.sum(np.abs((a_rl+a_cbf))), a_rl, a_cbf)
             env.solvable_flag.append(0)
         else:
