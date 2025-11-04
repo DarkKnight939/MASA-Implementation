@@ -195,7 +195,6 @@ def cbf_opt(env, a_rl, pred_dict):
                 sum_abs = np.sum(np.abs(a_final))
 
                 if not np.isclose(sum_abs, 1.0, atol=1e-2):
-                    print(f"[WARN] Action normalization adjusted — sum={sum_abs:.5f}")
                     a_final = a_final / (sum_abs + 1e-8)  # normalize to sum(abs(a)) = 1
 
                 env.solvable_flag.append(1)
@@ -255,7 +254,6 @@ def cbf_opt(env, a_rl, pred_dict):
             sum_abs = np.sum(np.abs(a_final))
 
             if not np.isclose(sum_abs, 1.0, atol=1e-2):
-                print(f"[WARN] Action normalization adjusted — sum={sum_abs:.5f}")
                 a_final = a_final / (sum_abs + 1e-8)  # normalize to sum(abs(a)) = 1
 
             env.solvable_flag.append(1)

@@ -66,7 +66,9 @@ class PoCallback(BaseCallback):
             ModelCls = model_select(model_name=self.config.rl_model_name,  mode=self.config.mode)
             trained_model = ModelCls.load(curmpath)
             if self.valid_env is not None:
-                obs_valid, _ = self.training_env.envs[0].reset()
+                obs_valid = self.valid_env.reset()
+            if isinstance(obs_valid, tuple):
+                obs_valid = obs_valid[0]
                 while True:
                     a_rlonly, _ = trained_model.predict(obs_valid)
                     a_rlonly = np.reshape(a_rlonly, (-1))
@@ -93,6 +95,9 @@ class PoCallback(BaseCallback):
                 
             if self.test_env is not None:
                 obs_test = self.test_env.reset()
+                if isinstance(obs_test, tuple):   # Gymnasium compatibility
+                    obs_test = obs_test[0]
+
                 while True:
                     a_rlonly, _ = trained_model.predict(obs_test)
                     a_rlonly = np.reshape(a_rlonly, (-1))
@@ -104,7 +109,12 @@ class PoCallback(BaseCallback):
                     a_final  = self.risk_controller(a_rl=a_rl, env=self.test_env)
                     a_final = a_final / np.sum(np.abs(a_final))
                     a_final = np.array([a_final])
-                    obs_test, rewards, terminal_flag, _ = self.test_env.step(a_final) 
+                    step_out = self.test_env.step(a_final)
+                    if len(step_out) == 5:
+                        obs_test, rewards, terminated, truncated, _ = step_out
+                        terminal_flag = terminated or truncated
+                    else:
+                        obs_test, rewards, terminal_flag, _ = step_out  # legacy env
                     if terminal_flag:
                         break
 

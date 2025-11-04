@@ -733,36 +733,41 @@ class StockPortfolioEnv(gym.Env):
             step_data = pd.DataFrame(pd.read_csv(fpath, header=0))
             
         if bestmodel_dict['{}_ep'.format(self.config.trained_best_model_type)] == invest_profile['ep']:
-            # --- Align array lengths before adding new columns ---
             len_df = len(step_data)
-            len_asset = len(invest_profile['asset_lst'])
 
-            if len_asset != len_df:
-                min_len = min(len_df, len_asset)
-                print(f"[WARN] Length mismatch in save_profile(): step_data={len_df}, asset_lst={len_asset}. Truncating to {min_len}.")
-                step_data = step_data.iloc[:min_len].copy()
-                invest_profile['asset_lst'] = invest_profile['asset_lst'][:min_len]
+            # Helper function to safely align lengths
+            def _safe_assign(colname, arr):
+                arr = np.array(arr)
+                if len(arr) != len_df:
+                    if len(arr) > len_df:
+                        arr = arr[:len_df]       # truncate
+                    elif len(arr) < len_df:
+                        # pad with last value
+                        arr = np.pad(arr, (0, len_df - len(arr)), mode='edge')
+                step_data[colname] = arr
 
-            step_data['capital_policy_best'] = invest_profile['asset_lst']
-            step_data['dailyReturn_policy_best'] = invest_profile['daily_return_lst']
-            step_data['reward_policy_best'] = invest_profile['reward_lst']
-            step_data['strategyVolatility_policy_best'] = invest_profile['stg_vol_lst']  
-            step_data['risk_policy_best'] = invest_profile['risk_lst']
-            step_data['risk_wocbf_policy_best'] = invest_profile['risk_wocbf_lst']
-            step_data['capital_wocbf_policy_best'] = invest_profile['capital_wocbf_lst']
-            step_data['dailySR_policy_best'] = invest_profile['daily_sr_lst']
-            step_data['dailySR_wocbf_policy_best'] = invest_profile['daily_sr_wocbf_lst']
-            step_data['riskAccepted_policy_best'] = invest_profile['risk_adj_lst']
-            step_data['ctrlWeight_policy_best'] = invest_profile['ctrl_weight_lst']
-            step_data['solvable_flag_policy_best'] = invest_profile['solvable_flag']
-            step_data['risk_pred_policy_best'] = invest_profile['risk_pred_lst']
-            step_data['final_action_abssum_policy_best'] = invest_profile['final_action_abssum_lst']
-            step_data['rl_action_abssum_policy_best'] = invest_profile['rl_action_abssum_lst']
-            step_data['cbf_action_abssum_policy_best'] = invest_profile['cbf_action_abssum_lst']
-            step_data['downsideAtVol_risk_policy_best'] = invest_profile['daily_downsideAtVol_risk_lst']
-            step_data['downsideAtValue_risk_policy_best'] = invest_profile['daily_downsideAtValue_risk_lst']
-            step_data['cvar_policy_best'] = invest_profile['cvar_lst']
-            step_data['cvar_raw_policy_best'] = invest_profile['cvar_raw_lst']
+            # Apply safe assignment for each list
+            _safe_assign('capital_policy_best', invest_profile['asset_lst'])
+            _safe_assign('dailyReturn_policy_best', invest_profile['daily_return_lst'])
+            _safe_assign('reward_policy_best', invest_profile['reward_lst'])
+            _safe_assign('strategyVolatility_policy_best', invest_profile['stg_vol_lst'])
+            _safe_assign('risk_policy_best', invest_profile['risk_lst'])
+            _safe_assign('risk_wocbf_policy_best', invest_profile['risk_wocbf_lst'])
+            _safe_assign('capital_wocbf_policy_best', invest_profile['capital_wocbf_lst'])
+            _safe_assign('dailySR_policy_best', invest_profile['daily_sr_lst'])
+            _safe_assign('dailySR_wocbf_policy_best', invest_profile['daily_sr_wocbf_lst'])
+            _safe_assign('riskAccepted_policy_best', invest_profile['risk_adj_lst'])
+            _safe_assign('ctrlWeight_policy_best', invest_profile['ctrl_weight_lst'])
+            _safe_assign('solvable_flag_policy_best', invest_profile['solvable_flag'])
+            _safe_assign('risk_pred_policy_best', invest_profile['risk_pred_lst'])
+            _safe_assign('final_action_abssum_policy_best', invest_profile['final_action_abssum_lst'])
+            _safe_assign('rl_action_abssum_policy_best', invest_profile['rl_action_abssum_lst'])
+            _safe_assign('cbf_action_abssum_policy_best', invest_profile['cbf_action_abssum_lst'])
+            _safe_assign('downsideAtVol_risk_policy_best', invest_profile['daily_downsideAtVol_risk_lst'])
+            _safe_assign('downsideAtValue_risk_policy_best', invest_profile['daily_downsideAtValue_risk_lst'])
+            _safe_assign('cvar_policy_best', invest_profile['cvar_lst'])
+            _safe_assign('cvar_raw_policy_best', invest_profile['cvar_raw_lst'])
+
         # Record the test set performance on valid_best_policy
         if self.mode == 'test':
             valid_fpath = os.path.join(self.config.res_dir, 'valid_bestmodel.csv')
